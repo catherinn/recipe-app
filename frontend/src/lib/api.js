@@ -43,7 +43,8 @@ export const auth = {
 
 // Onboarding APIs
 export const onboarding = {
-  submitContext: (context) => api.post('/onboarding/context', { context }),
+  start: () => api.get('/onboarding/start'),
+  submitBaseline: () => api.post('/onboarding/baseline'),
   answerQuestion: (questionId, answer) =>
     api.post('/onboarding/answer', { question_id: questionId, answer }),
   completeOnboarding: () => api.post('/onboarding/complete'),

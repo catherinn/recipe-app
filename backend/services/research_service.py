@@ -7,63 +7,100 @@ settings = get_settings()
 client = Anthropic(api_key=settings.anthropic_api_key)
 
 
-async def search_dietary_research(dietary_context: str) -> str:
+def get_baseline_questions() -> List[Dict]:
     """
-    Perform web search for dietary research based on user context.
-    This is a placeholder - in production, you'd use a real search API.
-    For now, we'll use Claude to simulate research-based question generation.
+    Get the baseline onboarding questions that everyone answers.
+    These are clear, focused questions to establish the foundation.
     """
-    # In production, you would use:
-    # - Google Custom Search API
-    # - Bing Search API
-    # - Or web scraping of trusted nutrition sites
+    return [
+        {
+            "question_text": "What's your main goal with meal planning?",
+            "question_type": "multiple_choice",
+            "options": [
+                "Eat healthier",
+                "Save time",
+                "Lose weight",
+                "Build muscle",
+                "Discover new recipes",
+                "Manage a health condition"
+            ],
+            "research_context": "Understanding your primary goal helps us tailor recipes and portions"
+        },
+        {
+            "question_text": "How many people are you typically cooking for?",
+            "question_type": "number",
+            "options": [],
+            "research_context": "We'll adjust all recipe servings to match your household"
+        },
+        {
+            "question_text": "How much time do you want to spend cooking on a typical day?",
+            "question_type": "multiple_choice",
+            "options": [
+                "15-30 minutes (quick meals)",
+                "30-60 minutes (balanced)",
+                "60+ minutes (I enjoy cooking)"
+            ],
+            "research_context": "Time constraints affect recipe complexity and cooking methods"
+        },
+        {
+            "question_text": "How would you describe your cooking skill level?",
+            "question_type": "multiple_choice",
+            "options": [
+                "Beginner (simple recipes please)",
+                "Intermediate (comfortable with basics)",
+                "Advanced (bring on the challenge)"
+            ],
+            "research_context": "We'll match recipe difficulty to your comfort level"
+        },
+        {
+            "question_text": "Which best describes your diet?",
+            "question_type": "multiple_choice",
+            "options": [
+                "I eat everything (omnivore)",
+                "Vegetarian",
+                "Vegan",
+                "Pescatarian (vegetarian + fish)",
+                "Flexitarian (mostly plant-based)",
+                "Other/specific diet"
+            ],
+            "research_context": "Your dietary type is the foundation for all recipe recommendations"
+        }
+    ]
 
-    # For MVP, we'll use Claude's knowledge + structured prompting
-    prompt = f"""
-Based on this dietary context: "{dietary_context}"
 
-Research and identify:
-1. The dietary type (vegetarian, vegan, pescatarian, omnivore, etc.)
-2. Common nutritional deficiencies or risks for this diet
-3. Important follow-up questions to ask for personalization
-4. Recommended food sources for at-risk nutrients
-
-Provide a structured analysis.
-"""
-
-    return prompt
-
-
-async def generate_onboarding_questions(
-    dietary_context: str,
-    user_info: Optional[Dict] = None
+async def generate_followup_questions(
+    baseline_answers: Dict[str, str]
 ) -> Dict:
     """
-    Use Claude to generate personalized onboarding questions based on user's dietary context.
-    This uses web research (simulated) to ask relevant questions.
+    Use Claude to generate smart follow-up questions based on baseline answers.
+    This adapts to the user's specific situation.
     """
 
-    # First, get research context
-    research_prompt = await search_dietary_research(dietary_context)
+    # Build context from baseline answers
+    answers_text = "\n".join([f"- {q}: {a}" for q, a in baseline_answers.items()])
 
-    # Generate questions using Claude
+    # Generate follow-up questions using Claude
     message = client.messages.create(
         model="claude-sonnet-4-20250514",
         max_tokens=2000,
         messages=[
             {
                 "role": "user",
-                "content": f"""You are a nutrition expert helping to onboard a new user to a recipe app.
+                "content": f"""You are a nutrition expert creating a personalized onboarding flow.
 
-User's dietary context: "{dietary_context}"
+The user has answered these baseline questions:
+{answers_text}
 
-Based on this context, generate 5-8 important follow-up questions to understand their needs better.
+Based on their answers, generate 3-5 smart follow-up questions to understand:
+1. Specific dietary restrictions or allergies
+2. Nutritional concerns based on their diet type
+3. Food preferences and dislikes
+4. Any other relevant details
 
 For each question:
-1. Make it specific to their situation
-2. Explain why you're asking (research-based reasoning)
-3. Suggest the question type (yes_no, multiple_choice, text, number)
-4. If multiple_choice, provide options
+- Make it conversational and friendly
+- Explain why you're asking (be transparent)
+- Keep it focused and not overwhelming
 
 Format your response as JSON:
 {{
@@ -71,28 +108,33 @@ Format your response as JSON:
   "nutritional_concerns": [
     {{
       "nutrient": "vitamin_b12",
-      "risk_level": "high|medium|low",
-      "reasoning": "why this is a concern",
-      "food_sources": ["fortified cereals", "nutritional yeast", "dairy"]
+      "risk_level": "at_risk|monitor",
+      "reasoning": "Vegetarians need to ensure adequate B12 intake",
+      "food_sources": ["fortified cereals", "nutritional yeast", "dairy", "eggs"]
     }}
   ],
   "questions": [
     {{
-      "question_text": "Do you consume dairy products like milk, cheese, or yogurt?",
+      "question_text": "Do you consume dairy products (milk, cheese, yogurt)?",
       "question_type": "yes_no",
       "options": [],
-      "research_context": "Dairy is a key source of B12 and calcium for vegetarians"
+      "research_context": "Dairy is a key source of B12, calcium, and protein for vegetarians"
     }},
     {{
-      "question_text": "How would you describe your current activity level?",
-      "question_type": "multiple_choice",
-      "options": ["Sedentary", "Lightly active", "Moderately active", "Very active"],
-      "research_context": "Activity level affects caloric and protein needs"
+      "question_text": "Are there any foods you're allergic to or can't eat?",
+      "question_type": "text",
+      "options": [],
+      "research_context": "We'll make sure to exclude these from all recipes"
     }}
   ]
 }}
 
-Make questions conversational and friendly, not clinical."""
+Important:
+- If they're vegetarian, ask about dairy, eggs, and fish to understand exactly what they eat
+- If they selected "lose weight", ask about their approach (calorie counting, portion control, etc.)
+- If they selected "manage health condition", ask what condition
+- Keep questions relevant to THEIR specific answers
+- Limit to 3-5 questions maximum - don't overwhelm them"""
             }
         ]
     )
@@ -103,7 +145,6 @@ Make questions conversational and friendly, not clinical."""
 
     # Extract JSON from response (Claude might add explanation text)
     try:
-        # Try to find JSON in the response
         start = response_text.find('{')
         end = response_text.rfind('}') + 1
         json_str = response_text[start:end]
@@ -112,30 +153,22 @@ Make questions conversational and friendly, not clinical."""
     except json.JSONDecodeError:
         # Fallback if JSON parsing fails
         return {
-            "detected_dietary_type": "unknown",
+            "detected_dietary_type": baseline_answers.get("Which best describes your diet?", "omnivore").lower(),
             "nutritional_concerns": [],
-            "questions": [
-                {
-                    "question_text": "Can you tell me more about your dietary preferences?",
-                    "question_type": "text",
-                    "options": [],
-                    "research_context": "Understanding dietary needs"
-                }
-            ]
+            "questions": []
         }
 
 
 async def analyze_onboarding_answers(
-    dietary_context: str,
-    questions_and_answers: List[Dict]
+    all_answers: Dict[str, str]
 ) -> Dict:
     """
     Analyze all onboarding answers to create a comprehensive user profile.
     """
 
     qa_text = "\n".join([
-        f"Q: {qa['question']}\nA: {qa['answer']}"
-        for qa in questions_and_answers
+        f"Q: {q}\nA: {a}"
+        for q, a in all_answers.items()
     ])
 
     message = client.messages.create(
@@ -144,9 +177,7 @@ async def analyze_onboarding_answers(
         messages=[
             {
                 "role": "user",
-                "content": f"""Based on this user's dietary context and answers, create a structured profile:
-
-Dietary Context: "{dietary_context}"
+                "content": f"""Based on the user's answers, create a structured profile:
 
 Questions & Answers:
 {qa_text}

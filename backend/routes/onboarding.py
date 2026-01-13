@@ -2,38 +2,36 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from database import get_db
 from schemas import (
-    OnboardingContextRequest,
-    OnboardingContextResponse,
     OnboardingQuestionResponse,
     OnboardingQuestionAnswer
 )
-from services.research_service import generate_onboarding_questions, analyze_onboarding_answers
+from services.research_service import get_baseline_questions, generate_followup_questions, analyze_onboarding_answers
 from models import User, OnboardingQuestion, UserProfile, DietaryRestriction, NutritionalConcern
 from routes.auth import get_current_user_dependency
 from datetime import datetime
+from typing import Dict
 
 router = APIRouter()
 
 
-@router.post("/context", response_model=OnboardingContextResponse)
-async def submit_dietary_context(
-    context_request: OnboardingContextRequest,
+@router.get("/start", response_model=dict)
+async def start_onboarding(
     current_user: User = Depends(get_current_user_dependency),
     db: Session = Depends(get_db)
 ):
     """
-    Submit dietary context and get personalized onboarding questions.
-    This uses web research (via Claude) to generate relevant questions.
+    Start onboarding by getting baseline questions.
+    These are the same for everyone - clear, focused questions.
     """
-    # Generate questions based on context
-    result = await generate_onboarding_questions(
-        dietary_context=context_request.context,
-        user_info={"name": current_user.name}
-    )
+    # Clear any existing onboarding questions
+    db.query(OnboardingQuestion).filter(OnboardingQuestion.user_id == current_user.id).delete()
 
-    # Save questions to database
+    # Get baseline questions
+    baseline_questions = get_baseline_questions()
+
+    # Save to database
     questions = []
-    for q_data in result.get('questions', []):
+    for q_data in baseline_questions:
         question = OnboardingQuestion(
             user_id=current_user.id,
             question_text=q_data['question_text'],
@@ -47,20 +45,89 @@ async def submit_dietary_context(
         db.add(question)
         questions.append(question)
 
-    # Save or update user profile with initial context
+    db.commit()
+
+    # Refresh to get IDs
+    for q in questions:
+        db.refresh(q)
+
+    return {
+        "message": "Onboarding started",
+        "stage": "baseline",
+        "questions": [
+            {
+                "id": q.id,
+                "user_id": q.user_id,
+                "question_text": q.question_text,
+                "question_type": q.question_type,
+                "options": q.get_options(),
+                "research_context": q.research_context,
+                "answer": q.answer,
+                "asked_at": q.asked_at,
+                "answered_at": q.answered_at
+            }
+            for q in questions
+        ]
+    }
+
+
+@router.post("/baseline", response_model=dict)
+async def submit_baseline_answers(
+    current_user: User = Depends(get_current_user_dependency),
+    db: Session = Depends(get_db)
+):
+    """
+    After baseline questions are answered, generate follow-up questions.
+    This uses AI to create personalized questions based on their answers.
+    """
+    # Get baseline questions with answers
+    questions = db.query(OnboardingQuestion).filter(
+        OnboardingQuestion.user_id == current_user.id,
+        OnboardingQuestion.answer.isnot(None)
+    ).all()
+
+    if len(questions) < 5:  # Should have at least the 5 baseline questions
+        raise HTTPException(status_code=400, detail="Please answer all baseline questions first")
+
+    # Build answer dict
+    baseline_answers = {
+        q.question_text: q.answer
+        for q in questions[:5]  # First 5 are baseline
+    }
+
+    # Generate follow-up questions
+    result = await generate_followup_questions(baseline_answers)
+
+    # Save follow-up questions to database
+    followup_questions = []
+    for q_data in result.get('questions', []):
+        question = OnboardingQuestion(
+            user_id=current_user.id,
+            question_text=q_data['question_text'],
+            question_type=q_data['question_type'],
+            research_context=q_data.get('research_context', '')
+        )
+
+        if q_data.get('options'):
+            question.set_options(q_data['options'])
+
+        db.add(question)
+        followup_questions.append(question)
+
+    # Create or update profile with detected info
     profile = db.query(UserProfile).filter(UserProfile.user_id == current_user.id).first()
     if not profile:
         profile = UserProfile(
             user_id=current_user.id,
-            dietary_context=context_request.context,
-            dietary_type=result.get('detected_dietary_type', 'unknown')
+            dietary_type=result.get('detected_dietary_type', 'omnivore')
         )
         db.add(profile)
     else:
-        profile.dietary_context = context_request.context
-        profile.dietary_type = result.get('detected_dietary_type', 'unknown')
+        profile.dietary_type = result.get('detected_dietary_type', 'omnivore')
 
     # Save nutritional concerns
+    db.query(NutritionalConcern).filter(NutritionalConcern.user_id == current_user.id).delete()
+
     for concern_data in result.get('nutritional_concerns', []):
         concern = NutritionalConcern(
             user_id=current_user.id,
@@ -75,11 +142,20 @@ async def submit_dietary_context(
     db.commit()
 
     # Refresh to get IDs
-    for q in questions:
+    for q in followup_questions:
         db.refresh(q)
 
-    # Build response
     return {
+        "message": "Follow-up questions generated",
+        "stage": "followup",
+        "detected_dietary_type": result.get('detected_dietary_type'),
+        "nutritional_concerns": [
+            {
+                "nutrient": c.get('nutrient', ''),
+                "reasoning": c.get('reasoning', '')
+            }
+            for c in result.get('nutritional_concerns', [])
+        ],
         "questions": [
             {
                 "id": q.id,
@@ -92,10 +168,8 @@ async def submit_dietary_context(
                 "asked_at": q.asked_at,
                 "answered_at": q.answered_at
             }
-            for q in questions
-        ],
-        "detected_dietary_type": result.get('detected_dietary_type'),
-        "detected_concerns": [c.get('nutrient', '') for c in result.get('nutritional_concerns', [])]
+            for q in followup_questions
+        ]
     }
 
 
@@ -131,11 +205,6 @@ async def complete_onboarding(
     """
     Complete onboarding by analyzing all answers and creating comprehensive profile.
     """
-    # Get profile
-    profile = db.query(UserProfile).filter(UserProfile.user_id == current_user.id).first()
-    if not profile:
-        raise HTTPException(status_code=404, detail="Profile not found. Submit context first.")
-
     # Get all answered questions
     questions = db.query(OnboardingQuestion).filter(
         OnboardingQuestion.user_id == current_user.id,
@@ -145,20 +214,23 @@ async def complete_onboarding(
     if not questions:
         raise HTTPException(status_code=400, detail="No questions answered yet")
 
-    # Prepare Q&A for analysis
-    qa_list = [
-        {"question": q.question_text, "answer": q.answer}
+    # Build answer dict
+    all_answers = {
+        q.question_text: q.answer
         for q in questions
-    ]
+    }
 
     # Analyze answers
-    analysis = await analyze_onboarding_answers(
-        dietary_context=profile.dietary_context,
-        questions_and_answers=qa_list
-    )
+    analysis = await analyze_onboarding_answers(all_answers)
+
+    # Get or create profile
+    profile = db.query(UserProfile).filter(UserProfile.user_id == current_user.id).first()
+    if not profile:
+        profile = UserProfile(user_id=current_user.id)
+        db.add(profile)
 
     # Update profile
-    profile.dietary_type = analysis.get('dietary_type', profile.dietary_type)
+    profile.dietary_type = analysis.get('dietary_type', 'omnivore')
 
     cooking_prefs = analysis.get('cooking_preferences', {})
     profile.cooking_time_preference = cooking_prefs.get('time_preference')
