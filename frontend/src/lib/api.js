@@ -38,6 +38,7 @@ api.interceptors.response.use(
 // Auth APIs
 export const auth = {
   googleLogin: (idToken) => api.post('/auth/google', { id_token: idToken }),
+  devLogin: () => api.post('/auth/dev-login'),
   getCurrentUser: () => api.get('/auth/me'),
 }
 

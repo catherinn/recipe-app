@@ -10,6 +10,38 @@ export default function LoginPage() {
   const [error, setError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
 
+  const handleDevLogin = async () => {
+    setIsLoading(true)
+    setError('')
+
+    try {
+      const response = await auth.devLogin()
+      const { access_token, user } = response.data
+
+      setAuth(user, access_token)
+
+      // Check if user needs onboarding
+      if (user.created_at) {
+        const createdDate = new Date(user.created_at)
+        const now = new Date()
+        const isNewUser = (now - createdDate) < 60000 // Less than 1 minute old
+
+        if (isNewUser) {
+          navigate('/onboarding')
+        } else {
+          navigate('/dashboard')
+        }
+      } else {
+        navigate('/dashboard')
+      }
+    } catch (err) {
+      console.error('Dev login error:', err)
+      setError(err.response?.data?.detail || 'Login failed. Please try again.')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
   const login = useGoogleLogin({
     onSuccess: async (tokenResponse) => {
       setIsLoading(true)
@@ -114,6 +146,37 @@ export default function LoginPage() {
                   />
                 </svg>
                 <span>Continue with Google</span>
+              </>
+            )}
+          </button>
+
+          <div className="relative my-6">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-gray-200 dark:border-gray-700"></div>
+            </div>
+            <div className="relative flex justify-center text-sm">
+              <span className="px-2 bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400">
+                Or for testing
+              </span>
+            </div>
+          </div>
+
+          <button
+            onClick={handleDevLogin}
+            disabled={isLoading}
+            className="w-full flex items-center justify-center gap-3 bg-primary-500 hover:bg-primary-600 text-white font-semibold py-4 px-6 rounded-xl shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isLoading ? (
+              <>
+                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                <span>Loading...</span>
+              </>
+            ) : (
+              <>
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+                <span>Continue in Test Mode</span>
               </>
             )}
           </button>
