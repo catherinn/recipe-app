@@ -39,7 +39,12 @@ app.include_router(meal_plans.router, prefix="/api/meal-plans", tags=["Meal Plan
 @app.on_event("startup")
 async def startup_event():
     """Initialize database on startup"""
-    init_db()
+    try:
+        init_db()
+        print("✓ Database initialized successfully")
+    except Exception as e:
+        print(f"⚠ Error initializing database: {e}")
+        # Don't crash - let the app start anyway
 
 
 @app.get("/")
@@ -53,7 +58,12 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy"}
+    """Health check endpoint for Railway and monitoring"""
+    return {
+        "status": "healthy",
+        "service": "recipe-app-api",
+        "version": "1.0.0"
+    }
 
 
 # Serve static files from frontend build (for production deployment)

@@ -3,16 +3,16 @@ from functools import lru_cache
 
 
 class Settings(BaseSettings):
-    # API Keys
-    anthropic_api_key: str
-    google_client_id: str
+    # API Keys (optional for test mode)
+    anthropic_api_key: str = "test-key"
+    google_client_id: str = "test-client-id"
     google_client_secret: str = ""
 
     # Database
     database_url: str = "sqlite:///./recipe_app.db"
 
     # JWT
-    jwt_secret_key: str
+    jwt_secret_key: str = "default-secret-key-change-in-production"
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60 * 24 * 7  # 7 days
 
