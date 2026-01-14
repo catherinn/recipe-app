@@ -12,10 +12,14 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CORS middleware
+# Allow all hosts for development
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=["*"])
+
+# CORS middleware - Allow all origins for development
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.frontend_url, "http://localhost:5173"],
+    allow_origins=["*"],  # In production, specify exact origins
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
