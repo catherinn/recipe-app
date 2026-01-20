@@ -6,8 +6,23 @@ from database import init_db
 from config import get_settings
 from routes import auth, onboarding, profile, recipes, meal_plans
 import os
+import logging
 
-settings = get_settings()
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+logger.info("Starting Recipe App...")
+
+try:
+    settings = get_settings()
+    logger.info("Settings loaded successfully")
+except Exception as e:
+    logger.error(f"Failed to load settings: {e}")
+    raise
 
 app = FastAPI(
     title="Recipe App API",
@@ -39,7 +54,13 @@ app.include_router(meal_plans.router, prefix="/api/meal-plans", tags=["Meal Plan
 @app.on_event("startup")
 async def startup_event():
     """Initialize database on startup"""
-    init_db()
+    logger.info("Initializing database...")
+    try:
+        init_db()
+        logger.info("Database initialized successfully")
+    except Exception as e:
+        logger.error(f"Database initialization failed: {e}")
+        raise
 
 
 @app.get("/")
@@ -53,7 +74,15 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy"}
+    """Health check endpoint for Railway"""
+    return {
+        "status": "healthy",
+        "config": {
+            "anthropic_api_key_set": bool(settings.anthropic_api_key),
+            "google_client_id_set": bool(settings.google_client_id),
+            "jwt_secret_key_set": bool(settings.jwt_secret_key),
+        }
+    }
 
 
 # Serve static files from frontend build (for production deployment)
