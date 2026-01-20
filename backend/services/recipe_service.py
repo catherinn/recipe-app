@@ -2,10 +2,28 @@ from anthropic import Anthropic
 from typing import List, Dict, Optional
 from datetime import date, timedelta
 import json
+import logging
 from config import get_settings
+from fastapi import HTTPException, status
 
+logger = logging.getLogger(__name__)
 settings = get_settings()
-client = Anthropic(api_key=settings.anthropic_api_key)
+
+# Lazy initialization of Anthropic client
+_client = None
+
+def get_anthropic_client():
+    """Get or create Anthropic client with validation"""
+    global _client
+    if not settings.anthropic_api_key:
+        logger.error("ANTHROPIC_API_KEY not configured")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="AI features are not configured. Please set ANTHROPIC_API_KEY environment variable."
+        )
+    if _client is None:
+        _client = Anthropic(api_key=settings.anthropic_api_key)
+    return _client
 
 
 async def generate_recipe(
@@ -79,6 +97,7 @@ Provide a detailed recipe in JSON format:
 
 Make it delicious, nutritionally balanced, and address their specific needs."""
 
+    client = get_anthropic_client()
     message = client.messages.create(
         model="claude-sonnet-4-20250514",
         max_tokens=2000,
@@ -200,6 +219,7 @@ Provide response in JSON format:
 
 Make it delicious, nutritionally complete, and varied!"""
 
+    client = get_anthropic_client()
     message = client.messages.create(
         model="claude-sonnet-4-20250514",
         max_tokens=8000,
